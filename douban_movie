@@ -1,0 +1,203 @@
+from urllib import request
+from bs4 import BeautifulSoup
+from pymongo import MongoClient
+from fake_useragent import UserAgent
+import json
+import random
+import time
+import socket
+import requests
+
+class MovieList(object):
+    def __init__(self):
+        self.start = 9970
+        self.ua = UserAgent(use_cache_server=False)
+        self.headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; WOW64) "
+                                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                      "Chrome/65.0.3325.146 Safari/537.36"}
+        self.sleep_time = 0.5
+        self.type = '%E6%88%90%E9%95%BF'
+        self.conn = MongoClient("mongodb://crawler:crawler@47.107.107.109:27017/crawl")
+        self.ip_pool= ["183.166.161.121:54248",
+                        "118.120.187.100:54286",
+                        "114.225.87.186:54263",
+                        "122.7.243.144:54258",
+                        "218.95.81.215:54261",
+                        "175.153.89.244:54255",
+                        "49.70.123.224:51649",
+                        "119.178.220.247:54213",
+                        "125.123.19.165:54236",
+                        "122.237.84.114:55946",
+                        "119.85.5.133:54242",
+                        "122.7.222.212:54258",
+                        "140.255.0.72:57889",
+                        "106.56.247.121:54232",
+                        "123.133.202.128:58878",
+                        "119.5.224.51:52361",
+                        "175.42.158.147:54254",
+                        "110.52.224.106:54252",
+                        "106.92.102.220:54697",
+                        "112.84.248.164:56915",
+                        "182.107.173.179:54276",
+                        "116.115.210.113:54226",
+                        "222.241.66.239:57524",
+                        "60.13.50.66:53012",
+                        "183.188.42.15:54278",
+                        "49.67.164.175:53197",
+                        "60.167.113.162:54247",
+                        "114.235.114.52:54224",
+                        "49.79.91.26:54206",
+                        "218.95.50.253:54261",
+                        "123.156.177.6:54281",
+                        "119.185.236.193:57856",
+                        "114.103.136.193:54276",
+                        "119.178.168.185:54213",
+                        "113.236.34.220:58946",
+                        "115.224.162.173:55946",
+                        "1.25.144.127:56410",
+                        "183.188.42.234:56996",
+                        "39.66.15.116:54243",
+                        "119.85.5.241:54242",
+                        "218.95.82.18:54261",
+                        "115.230.62.156:54270",
+                        "117.57.33.39:54212",
+                        "123.156.182.254:54281",
+                        "182.96.240.133:54249",
+                        "125.123.46.39:54236",
+                        "112.194.239.203:54285",
+                        "114.105.128.147:54265",
+                        "122.241.70.214:54208",
+                        "60.13.50.130:53012",
+                        "114.239.125.235:51649",
+                        "112.194.70.118:54226",
+                        "122.4.41.155:53937",
+                        "124.116.2.61:54659",
+                        "106.111.13.19:54289",
+                        "36.57.77.151:53752",
+                        "122.237.83.215:55946",
+                        "125.112.157.78:54230",
+                        "58.243.31.173:54676",
+                        "112.114.80.244:54271"
+                       ]
+
+
+    def get_id_list(self):
+        url = "https://movie.douban.com/j/new_search_subjects?sort=U" \
+              "&range=0,10&tags=%E7%94%B5%E5%BD%B1&start="+str(self.start)
+        over = True
+        try:
+            page = self.get_content(url)
+            print('正在获取第' + str((self.start + 20) / 20) + '页数据')
+            self.start += 20
+            page = json.loads(page)
+            subjects = page['data']
+            result = []
+            for s in subjects:
+                over = False
+                id = s['id']    # 电影ID
+                directors = s['directors']  #导演
+                rate = s['rate']    #评分
+                title = s['title']  #名称
+                new_url = s['url']
+                actors = s['casts'] #主演
+
+                movie_page = self.get_content(new_url)
+                soup = BeautifulSoup(movie_page, 'lxml')
+                if len(soup.find_all(id='info')) < 1:
+                    continue
+                info = soup.find_all(id='info')[0]
+                if len(info.find_all('span', class_='attrs')) < 2:
+                    continue
+                screenwriter_tmp = info.find_all('span', class_='attrs')[1]
+                screenwriter = []   #编剧
+                for i in screenwriter_tmp:
+                    if i.string != None and not '/' in i.string:
+                        screenwriter.append(i.string)
+                type_tmp = info.find_all('span', attrs={"property": "v:genre"})
+                type = []   #类型
+                for j in type_tmp:
+                    type.append(j.string)
+                if len(type_tmp) <= 0:
+                    continue
+                region_tmp = type_tmp[-1].next_sibling.next_sibling.next_sibling.next_sibling
+                region = (region_tmp.string).strip()    #地区
+                language_tmp = region_tmp.next_sibling.next_sibling.next_sibling.next_sibling
+                language = (language_tmp.string).strip()    #语言
+                release_tmp = info.find_all('span', attrs={"property": "v:initialReleaseDate"})
+                release_date = []   #发行时间
+                for x in release_tmp:
+                    release_date.append(x.string)
+                length_tmp = info.find_all('span', attrs={"property": "v:runtime"})
+                if length_tmp == None or len(length_tmp) < 1:
+                    length = None
+                    if len(release_tmp) > 0:
+                        tmp = release_tmp[-1]
+                    else:
+                        tmp = None
+                else:
+                    length = length_tmp[0].string.strip()  # 时长
+                    tmp = length_tmp[0]
+                cnt = 4
+
+
+                while tmp != None and cnt > 0:
+                    tmp = tmp.next_sibling
+                    cnt -= 1
+                other_name_tmp = tmp
+                if other_name_tmp != None:
+                    other_name = other_name_tmp.string.strip()  #别名
+                else :
+                    other_name = ""
+                tags_tmp = soup.find_all('div', class_='tags-body')[0].children
+                tags = []
+                for t in tags_tmp:
+                    tag = t.string.strip()
+                    if len(tag) > 0:
+                        tags.append(tag)
+                print('正在获取' + title + '的详细信息...')
+                print(id, directors, rate, title, actors, screenwriter, type, region, language, release_date, length, other_name, tags, '\n')
+
+                result.append({"movie_id": id, "rate": rate, "title": title, "actors" : actors, "screenwriter": screenwriter,
+                               "type": type, "region": region, "language": language, "release_date": release_date,
+                               "length": length, "other_name": other_name, "tags": tags })
+            try:
+                db = self.conn.get_database("crawl")
+                movie_info = db.movie_list
+                movie_info.insert_many(result)
+            except :
+                print('mongo insert error!')
+
+            return over
+        except request.URLError as e:
+            if hasattr(e, 'reason'):
+                print('获取失败，失败原因：', e.reason)
+                return over
+
+
+    def record_id(self):
+        myname = socket.getfqdn(socket.gethostname())
+        print("hhh:", socket.gethostbyname(myname))
+        while True:
+            self.headers = {"User-Agent": self.ua.random}
+            self.sleep_time = random.random()
+            if self.get_id_list():
+                break
+
+    def get_content(self, url):
+        print(url)
+        proxy_url = random.choice(self.ip_pool)
+        print(proxy_url)
+        proxy_dict = {
+            "http": proxy_url
+        }
+        response = requests.get(url, proxies=proxy_dict, headers=self.headers)
+        time.sleep(self.sleep_time)
+        html_doc = str(response.content, 'utf-8')
+        return html_doc
+
+    def main(self):
+        self.record_id()
+
+douban = MovieList()
+douban.main()
+
